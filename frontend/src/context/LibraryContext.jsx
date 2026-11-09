@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import {
   initialBooks,
   initialMembers,
@@ -8,6 +8,11 @@ import {
   initialSettings
 } from '../data/mockData';
 import { checkHealth } from '../services/healthService';
+import dashboardService from '../services/dashboardService';
+import bookService from '../services/bookService';
+import memberService from '../services/memberService';
+import circulationService from '../services/circulationService';
+import rfidService from '../services/rfidService';
 
 const LibraryContext = createContext();
 
@@ -18,6 +23,7 @@ export function LibraryProvider({ children }) {
   const [gateEvents, setGateEvents] = useState(initialGateEvents);
   const [auditLogs, setAuditLogs] = useState(initialAuditLogs);
   const [settings, setSettings] = useState(initialSettings);
+  const [dashboardStats, setDashboardStats] = useState(null);
   const [systemHealth, setSystemHealth] = useState({ status: 'checking', database: 'connecting' });
   const [activeTab, setActiveTab] = useState('dashboard');
   const [notifications, setNotifications] = useState([
@@ -41,212 +47,191 @@ export function LibraryProvider({ children }) {
 
   const toggleDarkMode = () => setDarkMode(prev => !prev);
 
-  // Periodically check backend health
-  useEffect(() => {
-    let isMounted = true;
-    const fetchHealth = async () => {
-      try {
-        const data = await checkHealth();
-        if (isMounted) setSystemHealth(data);
-      } catch (err) {
-        if (isMounted) {
-          setSystemHealth({
-            status: 'offline_mode',
-            database: 'local_cached',
-            error: err.message
-          });
-        }
+  // Sync data with live backend
+  const refreshAllData = useCallback(async () => {
+    try {
+      const health = await checkHealth();
+      setSystemHealth(health);
+
+      // Fetch live stats
+      const stats = await dashboardService.getStats();
+      if (stats) setDashboardStats(stats);
+
+      // Fetch live books
+      const booksData = await bookService.getBooks({ limit: 100 });
+      if (booksData && booksData.items && booksData.items.length > 0) {
+        // Map backend books to UI format
+        const formattedBooks = booksData.items.map(b => ({
+          id: b.id,
+          isbn: b.isbn,
+          title: b.title,
+          subtitle: b.subtitle,
+          category: b.category ? b.category.name : 'General',
+          publisher: b.publisher,
+          year: b.year,
+          totalCopies: b.total_copies,
+          availableCopies: b.available_copies,
+          isReference: b.is_reference,
+          authors: b.authors ? b.authors.map(a => a.name) : [],
+          copies: []
+        }));
+        setBooks(formattedBooks);
       }
-    };
-    fetchHealth();
-    const interval = setInterval(fetchHealth, 15000);
-    return () => {
-      isMounted = false;
-      clearInterval(interval);
-    };
+
+      // Fetch live members
+      const membersData = await memberService.getMembers({ limit: 100 });
+      if (membersData && membersData.items && membersData.items.length > 0) {
+        const formattedMembers = membersData.items.map(m => ({
+          id: m.id,
+          membershipNumber: m.membership_number,
+          fullName: m.full_name,
+          email: m.email,
+          phone: m.phone,
+          department: m.department,
+          membershipType: m.membership_type,
+          status: m.status,
+          outstandingFine: m.outstanding_fine,
+          activeLoansCount: m.active_loans_count,
+          maxLimit: m.membership_type === 'Faculty' ? 10 : 5
+        }));
+        setMembers(formattedMembers);
+      }
+
+      // Fetch live loans
+      const loansData = await circulationService.getLoans({ limit: 50 });
+      if (loansData && loansData.items && loansData.items.length > 0) {
+        const formattedLoans = loansData.items.map(l => ({
+          id: l.id,
+          loanNumber: l.loan_number,
+          memberId: l.member_id,
+          memberName: l.member_name,
+          membershipNumber: l.membership_number,
+          bookTitle: l.book_title,
+          accessionNumber: l.accession_number,
+          issueDate: l.issue_date ? l.issue_date.split('T')[0] : '',
+          dueDate: l.due_date ? l.due_date.split('T')[0] : '',
+          returnDate: l.return_date ? l.return_date.split('T')[0] : null,
+          status: l.status,
+          renewalCount: l.renewal_count
+        }));
+        setLoans(formattedLoans);
+      }
+
+      // Fetch live gate events
+      const gateData = await rfidService.getGateEvents({ limit: 50 });
+      if (gateData && gateData.items && gateData.items.length > 0) {
+        const formattedGate = gateData.items.map(g => ({
+          id: g.event_id,
+          timestamp: g.timestamp ? new Date(g.timestamp).toLocaleString() : '',
+          gateLocation: g.gate_location,
+          rfidUid: g.tag_uid,
+          accessionNumber: g.accession_number || 'N/A',
+          bookTitle: g.book_title,
+          authResult: g.auth_result,
+          alarmStatus: g.alarm_status,
+          securityBit: g.security_bit,
+          cctvReference: g.cctv_reference,
+          notificationStatus: g.notification_status
+        }));
+        setGateEvents(formattedGate);
+      }
+    } catch (err) {
+      console.warn('Backend sync fallback to cached state:', err.message);
+      setSystemHealth({
+        status: 'offline_mode',
+        database: 'local_cached',
+        error: err.message
+      });
+    }
   }, []);
 
+  useEffect(() => {
+    refreshAllData();
+    const interval = setInterval(refreshAllData, 20000);
+    return () => clearInterval(interval);
+  }, [refreshAllData]);
+
   // ISSUE BOOK ACTION
-  const issueBook = (memberId, accessionNumber) => {
-    const member = members.find(m => m.id === parseInt(memberId));
-    if (!member) return { success: false, message: 'Member not found' };
-
-    // Validation 1: Member Status
-    if (member.status === 'Blocked') {
-      return { success: false, message: 'Cannot issue: Member account is Blocked due to unpaid fines or policy.' };
-    }
-    if (member.status === 'Expired') {
-      return { success: false, message: 'Cannot issue: Membership has expired.' };
-    }
-
-    // Validation 2: Fines Threshold
-    if (member.outstandingFine >= settings.maxFineBlockThreshold) {
-      return { success: false, message: `Cannot issue: Outstanding fine ($${member.outstandingFine.toFixed(2)}) exceeds maximum allowable limit ($${settings.maxFineBlockThreshold.toFixed(2)}).` };
-    }
-
-    // Validation 3: Borrowing Limit
-    const activeMemberLoans = loans.filter(l => l.memberId === member.id && l.status !== 'Returned');
-    if (activeMemberLoans.length >= member.maxLimit) {
-      return { success: false, message: `Cannot issue: Member reached their borrowing limit of ${member.maxLimit} items.` };
-    }
-
-    // Find Book & Copy
-    let targetBook = null;
-    let targetCopy = null;
-
-    for (const b of books) {
-      const copy = b.copies.find(c => c.accessionNumber.toUpperCase() === accessionNumber.trim().toUpperCase());
-      if (copy) {
-        targetBook = b;
-        targetCopy = copy;
-        break;
+  const issueBook = async (memberId, accessionNumber) => {
+    try {
+      const res = await circulationService.issueBook({
+        member_id: parseInt(memberId),
+        accession_number: accessionNumber.trim()
+      });
+      if (res && res.success) {
+        await refreshAllData();
+        return { success: true, message: res.message };
       }
+    } catch (err) {
+      const msg = err.response?.data?.detail || err.message;
+      return { success: false, message: msg };
     }
-
-    if (!targetBook || !targetCopy) {
-      return { success: false, message: `Physical book copy with Accession #${accessionNumber} was not found.` };
-    }
-
-    // Validation 4: Reference Book restriction
-    if (targetBook.isReference || targetCopy.status === 'Reference Only') {
-      return { success: false, message: 'Strict Library Policy: Reference books cannot be issued outside the library.' };
-    }
-
-    if (targetCopy.status !== 'Available') {
-      return { success: false, message: `Book item is currently ${targetCopy.status} and cannot be issued.` };
-    }
-
-    // Calculate dates
-    const today = new Date();
-    const issueDateStr = today.toISOString().split('T')[0];
-    const dueDate = new Date();
-    dueDate.setDate(today.getDate() + settings.loanDurationDays);
-    const dueDateStr = dueDate.toISOString().split('T')[0];
-
-    const newLoan = {
-      id: Date.now(),
-      loanNumber: `LN-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
-      memberId: member.id,
-      memberName: member.fullName,
-      membershipNumber: member.membershipNumber,
-      bookTitle: targetBook.title,
-      accessionNumber: targetCopy.accessionNumber,
-      rfidUid: targetCopy.rfidUid,
-      issueDate: issueDateStr,
-      dueDate: dueDateStr,
-      returnDate: null,
-      renewalCount: 0,
-      status: 'Issued',
-      overdueDays: 0,
-      fineAmount: 0.00
-    };
-
-    // Update copy status
-    setBooks(prev => prev.map(b => {
-      if (b.id === targetBook.id) {
-        const updatedCopies = b.copies.map(c => c.id === targetCopy.id ? { ...c, status: 'Issued' } : c);
-        const avail = updatedCopies.filter(c => c.status === 'Available').length;
-        return { ...b, copies: updatedCopies, availableCopies: avail };
-      }
-      return b;
-    }));
-
-    // Update loans
-    setLoans(prev => [newLoan, ...prev]);
-
-    // Update member loans count
-    setMembers(prev => prev.map(m => m.id === member.id ? { ...m, activeLoansCount: m.activeLoansCount + 1 } : m));
-
-    // Audit log
-    const newLog = {
-      id: Date.now(),
-      timestamp: new Date().toLocaleString(),
-      user: 'librarian_desk',
-      action: 'BOOK_ISSUE',
-      resource: 'Loan',
-      resourceId: newLoan.loanNumber,
-      details: `Issued "${targetBook.title}" (${targetCopy.accessionNumber}) to ${member.fullName}`,
-      ip: '192.168.1.50'
-    };
-    setAuditLogs(prev => [newLog, ...prev]);
-
-    return { success: true, message: `Successfully issued "${targetBook.title}" to ${member.fullName}. Due on ${dueDateStr}.` };
   };
 
   // RETURN BOOK ACTION
-  const returnBook = (accessionNumber) => {
-    const acc = accessionNumber.trim().toUpperCase();
-    const activeLoan = loans.find(l => l.accessionNumber.toUpperCase() === acc && l.status !== 'Returned');
-
-    if (!activeLoan) {
-      return { success: false, message: `No active borrowing loan found for item ${accessionNumber}.` };
-    }
-
-    const todayStr = new Date().toISOString().split('T')[0];
-
-    // Mark loan returned
-    setLoans(prev => prev.map(l => l.id === activeLoan.id ? { ...l, returnDate: todayStr, status: 'Returned' } : l));
-
-    // Mark copy Available
-    setBooks(prev => prev.map(b => {
-      const copyExists = b.copies.some(c => c.accessionNumber.toUpperCase() === acc);
-      if (copyExists) {
-        const updatedCopies = b.copies.map(c => c.accessionNumber.toUpperCase() === acc ? { ...c, status: 'Available' } : c);
-        const avail = updatedCopies.filter(c => c.status === 'Available').length;
-        return { ...b, copies: updatedCopies, availableCopies: avail };
+  const returnBook = async (accessionNumber) => {
+    try {
+      const res = await circulationService.returnBook({
+        accession_number: accessionNumber.trim()
+      });
+      if (res && res.success) {
+        await refreshAllData();
+        return { success: true, message: res.message };
       }
-      return b;
-    }));
-
-    // Decrement member loans count
-    setMembers(prev => prev.map(m => m.id === activeLoan.memberId ? { ...m, activeLoansCount: Math.max(0, m.activeLoansCount - 1) } : m));
-
-    // Audit log
-    const newLog = {
-      id: Date.now(),
-      timestamp: new Date().toLocaleString(),
-      user: 'circulation_kiosk',
-      action: 'BOOK_RETURN',
-      resource: 'Loan',
-      resourceId: activeLoan.loanNumber,
-      details: `Returned book ${acc} (${activeLoan.bookTitle})`,
-      ip: '192.168.1.50'
-    };
-    setAuditLogs(prev => [newLog, ...prev]);
-
-    return { success: true, message: `Book ${acc} successfully returned to shelf availability.` };
+    } catch (err) {
+      const msg = err.response?.data?.detail || err.message;
+      return { success: false, message: msg };
+    }
   };
 
   // TRIGGER GATE EVENT SIMULATION
-  const triggerGateEvent = (isUnauthorized = false, customItem = null) => {
-    const sampleCopy = customItem || books[0].copies[0];
-    const eventId = `GATE-EV-${Math.floor(1000 + Math.random() * 9000)}`;
-    const timestamp = new Date().toLocaleString();
+  const triggerGateEvent = async (isUnauthorized = false, customItem = null) => {
+    try {
+      const tagUid = customItem?.rfidUid || (isUnauthorized ? 'E280116060000103' : 'E280116060000101');
+      const res = await rfidService.simulateGate(tagUid);
+      await refreshAllData();
 
-    const newEvent = {
-      id: eventId,
-      timestamp,
-      gateLocation: 'Main Security Gate #1',
-      rfidUid: sampleCopy.rfidUid,
-      accessionNumber: sampleCopy.accessionNumber,
-      bookTitle: sampleCopy.title || 'Introduction to Algorithms (Item Copy)',
-      authResult: isUnauthorized ? 'UNAUTHORIZED' : 'AUTHORIZED',
-      alarmStatus: isUnauthorized ? 'TRIGGERED' : 'QUIET',
-      securityBit: isUnauthorized ? 1 : 0,
-      cctvReference: `CCTV_CAM01_${Date.now()}.jpg`,
-      notificationStatus: isUnauthorized ? 'QUEUED' : 'NOT_REQUIRED'
-    };
+      if (res.alarm) {
+        setNotifications(prev => [
+          {
+            id: Date.now(),
+            title: `SECURITY ALERT: Unauthorized removal at ${res.gate_location} (${res.accession_number})`,
+            time: 'Just now',
+            unread: true,
+            type: 'alert'
+          },
+          ...prev
+        ]);
+      }
 
-    setGateEvents(prev => [newEvent, ...prev]);
-
-    if (isUnauthorized) {
-      setNotifications(prev => [
-        { id: Date.now(), title: `SECURITY ALERT: Unauthorized removal detected at Gate #1 (${sampleCopy.accessionNumber})`, time: 'Just now', unread: true, type: 'alert' },
-        ...prev
-      ]);
+      return {
+        id: res.event_id,
+        timestamp: new Date().toLocaleString(),
+        gateLocation: res.gate_location,
+        rfidUid: tagUid,
+        accessionNumber: res.accession_number || 'N/A',
+        bookTitle: res.book_title || 'Library Catalog Item',
+        authResult: res.auth_result,
+        alarmStatus: res.alarm ? 'TRIGGERED' : 'QUIET',
+        securityBit: res.alarm ? 1 : 0,
+        cctvReference: res.cctv_reference,
+        notificationStatus: res.alarm ? 'QUEUED' : 'NOT_REQUIRED'
+      };
+    } catch (err) {
+      console.error('Error triggering gate event:', err);
+      // Fallback
+      return {
+        id: `GATE-EV-${Math.floor(1000 + Math.random() * 9000)}`,
+        timestamp: new Date().toLocaleString(),
+        gateLocation: 'Main Security Gate #1',
+        rfidUid: 'E280116060000103',
+        accessionNumber: 'ACC-CS-00103',
+        bookTitle: 'Introduction to Algorithms',
+        authResult: isUnauthorized ? 'UNAUTHORIZED' : 'AUTHORIZED',
+        alarmStatus: isUnauthorized ? 'TRIGGERED' : 'QUIET',
+        securityBit: isUnauthorized ? 1 : 0
+      };
     }
-
-    return newEvent;
   };
 
   return (
@@ -264,6 +249,7 @@ export function LibraryProvider({ children }) {
         setAuditLogs,
         settings,
         setSettings,
+        dashboardStats,
         systemHealth,
         activeTab,
         setActiveTab,
@@ -272,7 +258,8 @@ export function LibraryProvider({ children }) {
         toggleDarkMode,
         issueBook,
         returnBook,
-        triggerGateEvent
+        triggerGateEvent,
+        refreshAllData,
       }}
     >
       {children}
