@@ -25,6 +25,22 @@ export function LibraryProvider({ children }) {
     { id: 2, title: 'Database Backup Completed', time: '1 hour ago', unread: false, type: 'info' }
   ]);
 
+  const [darkMode, setDarkMode] = useState(() => {
+    return localStorage.getItem('aisys_dark_mode') === 'true';
+  });
+
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('aisys_dark_mode', 'true');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('aisys_dark_mode', 'false');
+    }
+  }, [darkMode]);
+
+  const toggleDarkMode = () => setDarkMode(prev => !prev);
+
   // Periodically check backend health
   useEffect(() => {
     let isMounted = true;
@@ -252,6 +268,8 @@ export function LibraryProvider({ children }) {
         activeTab,
         setActiveTab,
         notifications,
+        darkMode,
+        toggleDarkMode,
         issueBook,
         returnBook,
         triggerGateEvent

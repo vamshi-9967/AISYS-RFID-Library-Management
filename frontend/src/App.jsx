@@ -59,7 +59,7 @@ function AppContent() {
   };
 
   return (
-    <div className="min-h-screen bg-[#F4F7FB] flex text-[#172B4D] font-sans antialiased">
+    <div className="min-h-screen bg-[#F4F7FB] dark:bg-[#07131F] flex text-[#172B4D] dark:text-slate-100 font-sans antialiased transition-colors duration-200">
       {/* Collapsible Sidebar */}
       <Sidebar isOpen={isSidebarOpen} setIsOpen={setIsSidebarOpen} />
 
