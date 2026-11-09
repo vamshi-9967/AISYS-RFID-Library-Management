@@ -1,68 +1,89 @@
-import { useState, useEffect } from 'react';
-import { checkHealth } from './services/healthService';
+import React, { useState } from 'react';
+import { LibraryProvider, useLibrary } from './context/LibraryContext';
+import Sidebar from './components/layout/Sidebar';
+import TopNavbar from './components/layout/TopNavbar';
 
-function App() {
-  const [health, setHealth] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+// Pages
+import DashboardPage from './pages/DashboardPage';
+import BooksPage from './pages/BooksPage';
+import CategoriesPage from './pages/CategoriesPage';
+import AuthorsPage from './pages/AuthorsPage';
+import MembersPage from './pages/MembersPage';
+import CirculationPage from './pages/CirculationPage';
+import RFIDManagementPage from './pages/RFIDManagementPage';
+import RFIDInventoryPage from './pages/RFIDInventoryPage';
+import SecurityGatePage from './pages/SecurityGatePage';
+import ReportsPage from './pages/ReportsPage';
+import DataMigrationPage from './pages/DataMigrationPage';
+import UserManagementPage from './pages/UserManagementPage';
+import AuditLogsPage from './pages/AuditLogsPage';
+import SystemSettingsPage from './pages/SystemSettingsPage';
 
-  useEffect(() => {
-    const fetchHealth = async () => {
-      try {
-        const data = await checkHealth();
-        setHealth(data);
-        setError(null);
-      } catch (err) {
-        setError('Failed to connect to backend: ' + (err.message || 'Unknown error'));
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchHealth();
-  }, []);
+function AppContent() {
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const { activeTab } = useLibrary();
+
+  const renderActiveView = () => {
+    switch (activeTab) {
+      case 'dashboard':
+        return <DashboardPage />;
+      case 'books':
+        return <BooksPage />;
+      case 'categories':
+        return <CategoriesPage />;
+      case 'authors':
+        return <AuthorsPage />;
+      case 'members':
+        return <MembersPage />;
+      case 'circulation':
+        return <CirculationPage />;
+      case 'rfid_management':
+        return <RFIDManagementPage />;
+      case 'rfid_inventory':
+        return <RFIDInventoryPage />;
+      case 'security_gate':
+        return <SecurityGatePage />;
+      case 'reports':
+        return <ReportsPage />;
+      case 'migration':
+        return <DataMigrationPage />;
+      case 'users':
+        return <UserManagementPage />;
+      case 'audit_logs':
+        return <AuditLogsPage />;
+      case 'settings':
+        return <SystemSettingsPage />;
+      default:
+        return <DashboardPage />;
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-      <div className="bg-white rounded-2xl shadow-lg p-10 max-w-lg w-full text-center">
-        <h1 className="text-3xl font-bold text-[#164B78] mb-2">
-          AISYS Library Management System
-        </h1>
-        <p className="text-gray-500 mb-8">RFID-Enabled • Phase 1 Foundation</p>
+    <div className="min-h-screen bg-[#F8FAFC] flex text-slate-900 font-sans antialiased">
+      {/* Collapsible Sidebar */}
+      <Sidebar isOpen={isSidebarOpen} setIsOpen={setIsSidebarOpen} />
 
-        {loading && (
-          <div className="flex items-center justify-center gap-2 text-[#164B78]">
-            <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/>
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-            </svg>
-            <span>Connecting to backend...</span>
-          </div>
-        )}
+      {/* Main App Content Container */}
+      <div
+        className={`flex-1 flex flex-col min-w-0 transition-all duration-300 ease-in-out ${
+          isSidebarOpen ? 'ml-68' : 'ml-20'
+        }`}
+      >
+        <TopNavbar isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} />
 
-        {error && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
-            <p className="font-semibold">Connection Error</p>
-            <p className="text-sm mt-1">{error}</p>
-          </div>
-        )}
-
-        {health && (
-          <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-            <p className="text-green-700 font-semibold text-lg">✓ Backend Connected</p>
-            <div className="mt-3 text-sm text-gray-600 space-y-1">
-              <p>Status: <span className="font-medium text-green-600">{health.status}</span></p>
-              <p>Database: <span className="font-medium text-green-600">{health.database}</span></p>
-              <p>Version: <span className="font-medium">{health.version}</span></p>
-            </div>
-          </div>
-        )}
-
-        <div className="mt-8 text-xs text-gray-400">
-          Frontend: React + Vite + Tailwind CSS • Backend: FastAPI + SQLAlchemy + SQLite
-        </div>
+        {/* Dynamic Page View Body */}
+        <main className="flex-1 p-6 max-w-7xl w-full mx-auto animate-in fade-in duration-150">
+          {renderActiveView()}
+        </main>
       </div>
     </div>
   );
 }
 
-export default App;
+export default function App() {
+  return (
+    <LibraryProvider>
+      <AppContent />
+    </LibraryProvider>
+  );
+}
