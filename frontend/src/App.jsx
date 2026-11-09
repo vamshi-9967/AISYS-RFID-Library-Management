@@ -59,14 +59,14 @@ function AppContent() {
   };
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] flex text-slate-900 font-sans antialiased">
+    <div className="min-h-screen bg-[#F4F7FB] flex text-[#172B4D] font-sans antialiased">
       {/* Collapsible Sidebar */}
       <Sidebar isOpen={isSidebarOpen} setIsOpen={setIsSidebarOpen} />
 
       {/* Main App Content Container */}
       <div
         className={`flex-1 flex flex-col min-w-0 transition-all duration-300 ease-in-out ${
-          isSidebarOpen ? 'ml-68' : 'ml-20'
+          isSidebarOpen ? 'ml-64' : 'ml-20'
         }`}
       >
         <TopNavbar isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} />
